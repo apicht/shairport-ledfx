@@ -18,5 +18,26 @@ services:
         max-size: "10m"
         max-file: "5"
 
+  shairport:
+    image: ${SHAIRPORT_IMAGE}
+    container_name: shairport
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - SYS_NICE          # nqptp scheduling priority
+    depends_on:
+      ledfx:
+        condition: service_healthy
+    environment:
+      PULSE_SERVER: "unix:/tmp/pulseaudio.socket"
+      PULSE_COOKIE: "/tmp/cookie"
+    volumes:
+      - ./shairport-sync/shairport-sync.conf:/etc/shairport-sync.conf:ro
+      - ./volumes/ledfx-pulse:/tmp:rw
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "5"
+
 volumes:
   ledfx-config:
