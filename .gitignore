@@ -3,4 +3,7 @@ volumes/*
 !volumes/ledfx-pulse
 volumes/ledfx-pulse/*
 !volumes/ledfx-pulse/.gitkeep
+!volumes/ledfx-config
+volumes/ledfx-config/*
+!volumes/ledfx-config/.gitkeep
 .idea

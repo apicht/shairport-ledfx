@@ -100,9 +100,9 @@ cp .env.example .env
 $EDITOR .env       # at minimum, set AIRPLAY_NAME and MQTT_HOST
                    # (or set MQTT_ENABLED=no to skip MQTT entirely)
 
-# 2. Prepare the host volume (must be writable by UID 1000 — LedFx's user)
-mkdir -p volumes/ledfx-pulse
-sudo chown -R 1000:1000 volumes/ledfx-pulse
+# 2. Prepare the host volumes (must be writable by UID 1000 — LedFx's user)
+mkdir -p volumes/ledfx-pulse volumes/ledfx-config
+sudo chown -R 1000:1000 volumes/ledfx-pulse volumes/ledfx-config
 
 # 3. Bring up the stack
 docker compose up -d
@@ -120,8 +120,8 @@ target host's address:
 ```bash
 rsync -avz --exclude=.git --exclude=volumes ./ <nas>:~/shairport-ledfx/
 rsync -avz .env <nas>:~/shairport-ledfx/.env
-ssh <nas> 'mkdir -p ~/shairport-ledfx/volumes/ledfx-pulse && \
-           sudo chown -R 1000:1000 ~/shairport-ledfx/volumes/ledfx-pulse && \
+ssh <nas> 'mkdir -p ~/shairport-ledfx/volumes/ledfx-pulse ~/shairport-ledfx/volumes/ledfx-config && \
+           sudo chown -R 1000:1000 ~/shairport-ledfx/volumes/ledfx-pulse ~/shairport-ledfx/volumes/ledfx-config && \
            cd ~/shairport-ledfx && docker compose up -d'
 ```
 
@@ -210,8 +210,10 @@ reusing your admin user.
 
 ### LedFx
 
-LedFx state lives in a Docker named volume (`ledfx-config`), persisted
-across container restarts. First-time setup is via the web UI at
+LedFx state lives in a host bind-mount at `./volumes/ledfx-config/`
+(must be `chown 1000:1000` so LedFx, running as UID 1000, can write its
+log and config). State persists across container restarts and across
+`docker compose down/up` cycles. First-time setup is via the web UI at
 `http://<host>:8888`:
 
 1. Audio device → select the Pulse default source (also scriptable via

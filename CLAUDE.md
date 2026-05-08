@@ -59,7 +59,8 @@ The implementation plan that used to live at `docs/superpowers/plans/` was delet
 
 ## Gotchas worth remembering
 
-- The `volumes/ledfx-pulse/` host dir must be `chown 1000:1000` before first `compose up` — LedFx writes the Pulse socket there as UID 1000. The `.gitkeep` placeholder in that dir gets clobbered by LedFx's `start.sh` on first run; this is expected and the `.gitignore` accommodates it.
+- Both `volumes/ledfx-pulse/` and `volumes/ledfx-config/` host dirs must be `chown 1000:1000` before first `compose up` — LedFx runs as UID 1000 and writes the Pulse socket and its config/log files there. The `.gitkeep` placeholder in the pulse dir gets clobbered by LedFx's `start.sh` on first run; this is expected and the `.gitignore` accommodates it.
+- `ledfx-config` is intentionally a **bind mount, not a named volume**. The upstream LedFx image chowns `/home/ledfx` at build but never creates the `ledfx-config` subdirectory — so a named volume's auto-created mountpoint comes up `root:root`, and LedFx (UID 1000) fails with `EACCES` on `ledfx.log`. Bind mount + host chown sidesteps this. Don't switch back to a named volume without solving the chown-on-init problem (e.g., a privileged init container).
 - `MQTT_PASSWORD` is rendered as plaintext into the libconfig file inside the `shairport-config` Docker volume, and is also visible in `docker inspect shairport-config-render`. libconfig has no secret-store mechanism, so this is structural — document, don't fix.
 - `.env.example` only contains vars the stack actually reads. Don't add deploy-helper vars (like SSH hostnames) — those belong in shell or README examples.
 - The `shairport-config` named volume is regenerated on every `up`. Don't put any user-managed state in it.

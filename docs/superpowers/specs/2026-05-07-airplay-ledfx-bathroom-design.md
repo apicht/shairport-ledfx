@@ -76,7 +76,16 @@ events to a Mosquitto broker that Home Assistant subscribes to.
 - Runs in PulseAudio **server mode** (a Pulse instance lives inside the
   container). The official LedFx Docker docs document this pattern.
 - Exposes the Pulse socket to siblings via a bind-mount of
-  `~/ledfx/pulse:/home/ledfx/.config/pulse` (UID:GID 1000:1000, rw).
+  `./volumes/ledfx-pulse:/home/ledfx/.config/pulse` (host dir must be
+  `chown 1000:1000`).
+- LedFx state (config + logs) lives in a sibling bind-mount of
+  `./volumes/ledfx-config:/home/ledfx/ledfx-config` (host dir must be
+  `chown 1000:1000`). A bind mount is used here rather than a named
+  volume because the upstream image does not pre-create
+  `/home/ledfx/ledfx-config/` at build time — Docker would auto-create
+  the mountpoint as `root:root`, leaving LedFx (UID 1000) unable to
+  write its log file. With a bind mount, the host's ownership is
+  authoritative.
 - `network_mode: host` — required for WLED DDP and mDNS discovery.
 - Web UI on `http://<nas>:8888`.
 - Sends DDP (UDP/4048) to the WLED device by IP. DDP is preferred over E1.31
@@ -321,6 +330,13 @@ is unlikely to affect AP2 sync quality — verified in testing if any issues.
   autodiscovery and an `MQTT_ENABLED` toggle. Architecture, components,
   configuration touchpoints, failure modes, testing strategy, and
   component versions updated accordingly.
+- **2026-05-08 (volume fix)** — Switched `ledfx-config` from named volume
+  to bind mount at `./volumes/ledfx-config/`. Cause: the upstream LedFx
+  Dockerfile chowns `/home/ledfx` at build but never creates
+  `/home/ledfx/ledfx-config/`, so a named volume's auto-created mountpoint
+  defaults to `root:root` and LedFx (UID 1000) gets `EACCES` writing
+  `ledfx.log`. The LedFx upstream `docker-compose-example.yml` is also
+  affected; we just hit it before they did.
 - **2026-05-08 (image registry fix)** — LedFx publishes versioned images
   to Docker Hub as `ledfxorg/ledfx:<version>`, not to GHCR. The original
   `ghcr.io/ledfx/ledfx:v2.1.8` pin failed with "manifest unknown"; the
