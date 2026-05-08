@@ -95,7 +95,10 @@ EOF
     cat <<EOF
 pulseaudio = {
     server = "unix:/tmp/pulseaudio.socket";
-    sink = "";  // Use the Pulse default sink created by LedFx's pulseaudio.
+    // sink is intentionally not set: shairport falls back to the PulseAudio
+    // server's default sink, which is the "auto_null" sink created by
+    // LedFx's module-always-sink. Setting sink="" here causes shairport's
+    // PA backend to fail with PA_BAD_STATE on stream connect.
 };
 
 diagnostics = {
