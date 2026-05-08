@@ -1,7 +1,7 @@
 # Audio-Reactive WLED in the Bathroom — Design
 
-Date: 2026-05-07
-Status: Draft pending user review
+Date: 2026-05-07 (revised 2026-05-08)
+Status: Approved; updated to reflect MQTT/HA integration and env-driven config rendering
 
 ## Goal
 
@@ -29,32 +29,44 @@ multi-room sync, so the design uses AirPlay 2 throughout.
 ```
                     ┌────────────────────────────────────┐
                     │  Home Assistant + Music Assistant  │
-                    │       (existing, on ODROID)        │
-                    └─────────────────┬──────────────────┘
-                                      │ AirPlay 2 (sender)
-                  ┌───────────────────┼───────────────────┐
-                  ▼                                       ▼
-       ┌─────────────────────┐                 ┌────────────────────┐
-       │ shairport-sync      │                 │   Arylic LP10      │
-       │  (Docker, NAS)      │                 │   (AV rack)        │
-       │  AP2 + nqptp        │                 └─────────┬──────────┘
-       │  → Pulse socket     │                           │ analog out
-       └──────────┬──────────┘                           ▼
-                  │ unix socket                  ┌──────────────┐
-                  ▼                              │ Multi-zone   │
-       ┌─────────────────────┐                   │   amp        │
-       │ LedFx (Docker, NAS) │                   └──────┬───────┘
-       │ Pulse server mode   │                          │
-       │ FFT → DDP           │                          ▼
-       └──────────┬──────────┘                   bathroom speaker
-                  │ DDP (UDP/4048)
-                  ▼
-              WLED (bathroom)
+                    │  + Mosquitto add-on (on ODROID)    │
+                    └────┬─────────────────────────┬─────┘
+                         │ AirPlay 2 (sender)      ▲ MQTT (subscribe)
+                  ┌──────┴────────┐                │
+                  ▼               ▼                │
+   ┌─────────────────┐  ┌──────────────────┐       │
+   │ shairport-sync  │  │   Arylic LP10    │       │
+   │  (Docker, NAS)  │  │   (AV rack)      │       │
+   │  AP2 + nqptp    │  └────────┬─────────┘       │
+   │  → Pulse socket │           │ analog out      │
+   │  → MQTT events  ├───────────┼─────────────────┘
+   └────────┬────────┘           ▼
+            │ unix socket   ┌─────────┐
+            ▼               │  amp    │
+   ┌─────────────────┐      └────┬────┘
+   │ LedFx (Docker)  │           │
+   │ Pulse server    │           ▼
+   │ FFT → DDP       │     bathroom speaker
+   └────────┬────────┘
+            │ DDP (UDP/4048)
+            ▼
+        WLED (bathroom)
+
+   ┌─────────────────────────────┐
+   │ shairport-config-render     │   one-shot init container.
+   │  (Docker, NAS, exits)       │   Renders shairport-sync.conf
+   │  bash + render-config.sh    │   from .env into shared volume.
+   └─────────────────────────────┘
 ```
 
-Two Docker containers on the NAS share the LedFx-hosted PulseAudio socket via
-a bind-mount. shairport-sync writes audio into the socket; LedFx reads its
-default Pulse source, runs FFT, and pushes effects to WLED.
+Three Docker containers on the NAS. **shairport-config-render** is a
+one-shot init container that runs at each `docker compose up`: it reads
+env vars from `.env`, renders `shairport-sync.conf` to a named volume, and
+exits. **shairport-sync** depends on it (`service_completed_successfully`)
+and reads the rendered config. **LedFx** hosts a PulseAudio server in
+server mode and exposes its socket via a bind-mount. shairport-sync writes
+audio into that socket and (when MQTT is enabled) publishes session
+events to a Mosquitto broker that Home Assistant subscribes to.
 
 ## Components
 
@@ -73,18 +85,31 @@ default Pulse source, runs FFT, and pushes effects to WLED.
 ### shairport-sync (AirPlay 2 receiver)
 
 - Image: `mikebrady/shairport-sync:5.0.4`
-- The `:latest` / non-`-classic` tag bundles nqptp internally; AP2 mode works
-  out of the box. `:latest-classic` is AP1 only — do not use.
+- The `:latest` / non-`-classic` tag bundles nqptp internally and is built
+  with `--with-mqtt-client`; AP2 mode and MQTT publishing work out of the
+  box. `:latest-classic` is AP1 only — do not use.
 - `network_mode: host` — required for AirPlay 2 (mDNS, PTP on UDP/319-320).
 - `cap_add: [SYS_NICE]` — needed for nqptp scheduling priority.
-- PulseAudio backend: `command: -o pulseaudio` (or set in `shairport-sync.conf`).
 - Connects to LedFx's Pulse socket via bind-mount.
-- Configuration file (`shairport-sync.conf`) sets:
-  - `general.name = "Bathroom-Sync"` — visible name in AirPlay pickers and MA
-  - `general.ignore_volume_control = "yes"` — keeps Pulse loopback at unity so
-    LedFx FFT sees consistent levels regardless of sender volume
-  - `general.output_backend = "pulseaudio"`
-  - HomeKit/AP2 config block enabled (default)
+- Reads its config from a named volume (`shairport-config`) populated by
+  the render container; runs with `-c /cfg/shairport-sync.conf`.
+- All operator-tunable settings (`AIRPLAY_NAME`, MQTT broker, etc.) come
+  from `.env`. Fixed settings (PA backend, `ignore_volume_control`) live
+  in the render script.
+
+### shairport-config-render (init container)
+
+- Image: `bash:5.2-alpine3.19`
+- One-shot: runs at each `docker compose up`, executes
+  `shairport-sync/render-config.sh`, writes `shairport-sync.conf` to the
+  `shairport-config` named volume, and exits.
+- Why it exists: shairport-sync's libconfig format has no env-var
+  substitution and conditional MQTT-auth lines need real shell logic. A
+  small init container keeps `docker compose up` as the single deploy
+  command (no host-side `make config` step).
+- `restart: "no"` — failure here blocks `shairport` (which `depends_on`
+  it with `service_completed_successfully`), so a misconfigured `.env`
+  fails fast at deploy time rather than producing a malformed config.
 
 ### Music Assistant (existing, no changes to deployment)
 
@@ -120,6 +145,36 @@ These mechanisms are independent and can both be used. **Caveat:** AirPlay
 groups are Apple-only on the sender side; Android phones and Google Home
 speakers cannot target them. The user has accepted this trade-off.
 
+## Home Assistant integration via MQTT
+
+shairport-sync's built-in MQTT publisher emits AirPlay session events and
+per-track metadata to a Mosquitto broker. Combined with HA-MQTT
+autodiscovery (`enable_autodiscovery = "yes"`), a `media_player` entity
+appears in HA automatically — no manual `configuration.yaml` work.
+
+**Topics published** (under `<MQTT_TOPIC>/...`, defaulting to `<AIRPLAY_NAME>/...`):
+
+| Topic | When |
+|---|---|
+| `play_start` | An AirPlay session begins |
+| `play_end` | An AirPlay session ends |
+| `play_flush` | Sender flushes the buffer (seek/skip) |
+| `play_resume` | Sender resumes after pause |
+| `title`, `artist`, `album`, `genre`, `format`, `songalbum`, `volume`, `client_ip` | Per-track metadata at session start |
+
+These are HA automation triggers (`platform: mqtt`, `topic:
+Bathroom-Sync/play_start`). Source-agnostic — fires for any AirPlay
+sender (Music Assistant, iPhone, Mac, Spotify, Apple Music, browser).
+
+**Toggle:** `MQTT_ENABLED=no` in `.env` omits the entire `mqtt = {…}`
+block from the rendered config and removes the `MQTT_HOST` requirement.
+The default is `yes`.
+
+**Broker placement:** the HA Mosquitto add-on lives inside HAOS. From
+the QNAP (a separate host), reach it via the HA host's LAN
+hostname/IP (e.g., `homeassistant.local:1883`), not the in-HAOS Docker
+name `core-mosquitto`.
+
 ## Sync characteristics
 
 - Two AirPlay 2 endpoints in a sync group use AirPlay 2's native multi-room
@@ -154,16 +209,28 @@ speakers cannot target them. The user has accepted this trade-off.
 
 Files the user will edit during install:
 
-1. `docker-compose.yml` — two services (`ledfx`, `shairport`) on host
-   networking, with the shared Pulse bind-mount.
-2. `shairport-sync.conf` — set `name`, output backend, ignore volume.
-3. LedFx web UI / `PUT /api/audio/devices` — select the Pulse default source
+1. `.env` (copied from `.env.example`) — single source of truth for
+   operator settings: `AIRPLAY_NAME`, `WLED_IP`, `MQTT_*`,
+   `MQTT_ENABLED`, image tags. The render container picks up `AIRPLAY_NAME`
+   and `MQTT_*`; compose's auto-`.env` discovery picks up image tags and
+   anything used in the YAML's `${VAR}` substitutions.
+2. `shairport-sync/render-config.sh` — the source of truth for *fixed*
+   shairport-sync settings (PA backend, `ignore_volume_control`,
+   `publish_parsed`, autodiscovery prefix). Edit only when you want to
+   change behavior that isn't `.env`-tunable.
+3. `docker-compose.yml` — three services (`ledfx`, `shairport`,
+   `shairport-config-render`). Edit only to change image versions, add
+   another LedFx instance for another room, etc.
+4. LedFx web UI / `PUT /api/audio/devices` — select the Pulse default source
    as the active audio device.
-4. Music Assistant (HA UI) — add LP10 (AirPlay), confirm Bathroom-Sync was
+5. Music Assistant (HA UI) — add LP10 (AirPlay), confirm Bathroom-Sync was
    auto-discovered, create sync group "Bathroom Reactive."
-5. Apple Home app (optional) — add Bathroom-Sync as an AirPlay 2 device, then
-   create an AirPlay group containing it and the LP10. Enables direct AirPlay
-   from any Apple device.
+6. Apple Home app (optional) — add Bathroom-Sync as an AirPlay 2 device,
+   then create an AirPlay group containing it and the LP10. Enables direct
+   AirPlay from any Apple device.
+7. Home Assistant (when `MQTT_ENABLED=yes`) — verify the autodiscovered
+   `media_player.bathroom_sync` entity appears under MQTT, then write
+   automations against `Bathroom-Sync/play_start` / `play_end` topics.
 
 ## Failure modes
 
@@ -176,6 +243,8 @@ Files the user will edit during install:
 | MA unreachable | No audio source for either path; direct AirPlay still works | HA/MA recovery |
 | NAS reboot | Container Station auto-starts compose stack | MA rediscovers Bathroom-Sync via mDNS within ~30s |
 | nqptp port conflict | shairport-sync logs "PTP port unavailable" | Identify and disable the conflicting service |
+| Render container fails (e.g., `MQTT_HOST` missing while `MQTT_ENABLED=yes`) | `shairport` never starts (`depends_on: service_completed_successfully`) | Fix `.env` or set `MQTT_ENABLED=no`; rerun `docker compose up` |
+| MQTT broker unreachable (with `MQTT_ENABLED=yes`) | shairport-sync runs and serves AirPlay normally; logs MQTT connection errors and retries | Bring broker back; no manual intervention needed |
 
 ## Testing strategy
 
@@ -197,7 +266,11 @@ In order, gating each step before the next:
    are in audible/visible sync.
 7. **Apple Home group (optional).** Add Bathroom-Sync to Apple Home, group
    with LP10, AirPlay from a phone to the group; same expectations as step 6.
-8. **Reboot.** Restart the NAS; confirm the stack comes up cleanly and MA
+8. **MQTT autodiscovery (when `MQTT_ENABLED=yes`).** Subscribe to
+   `Bathroom-Sync/#` on the broker; play and stop a track; confirm
+   `play_start` and `play_end` arrive. In HA, confirm the autodiscovered
+   `media_player.bathroom_sync` entity appears under the MQTT integration.
+9. **Reboot.** Restart the NAS; confirm the stack comes up cleanly and MA
    rediscovers within 60 s.
 
 ## Out of scope
@@ -219,6 +292,7 @@ In order, gating each step before the next:
 | nqptp (bundled in shairport-sync image) | 1.2.x | per image build |
 | LedFx | 2.1.8 | 2026-04-21 |
 | Music Assistant | 2.8.6 | 2026-04-23 |
+| bash (render init container) | 5.2-alpine3.19 | upstream Docker official |
 
 The shairport-sync 5.0.4 image was built before nqptp 1.2.7 released; the
 bundled nqptp version is whatever was current when the image was built. This
@@ -234,3 +308,13 @@ is unlikely to affect AP2 sync quality — verified in testing if any issues.
   https://github.com/mikebrady/shairport-sync/blob/master/AIRPLAY2.md
 - Music Assistant docs (player providers, sync groups):
   https://music-assistant.io/
+
+## Revision history
+
+- **2026-05-07** — Initial design approved. Two containers (LedFx,
+  shairport-sync) with static `shairport-sync.conf`.
+- **2026-05-08** — Added `.env`-driven config rendering via a
+  `shairport-config-render` init container; added MQTT publisher with HA
+  autodiscovery and an `MQTT_ENABLED` toggle. Architecture, components,
+  configuration touchpoints, failure modes, testing strategy, and
+  component versions updated accordingly.
