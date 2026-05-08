@@ -99,7 +99,7 @@ events to a Mosquitto broker that Home Assistant subscribes to.
 
 ### shairport-config-render (init container)
 
-- Image: `bash:5.2-alpine3.19`
+- Image: `bash:5.2-alpine3.22`
 - One-shot: runs at each `docker compose up`, executes
   `shairport-sync/render-config.sh`, writes `shairport-sync.conf` to the
   `shairport-config` named volume, and exits.
@@ -201,19 +201,22 @@ name `core-mosquitto`.
   PTP. Verify none are present before deploying.
 - **mDNS service collisions:** shairport-sync advertises `_raop._tcp` and
   `_airplay._tcp`. The `general.name` setting must be unique on the LAN.
-- **PulseAudio cookie:** LedFx generates a Pulse cookie on first run. The
-  shairport-sync container must mount the same cookie path so authentication
-  succeeds. Documented in the LedFx Docker docs.
+- **PulseAudio socket ownership:** LedFx runs as UID 1000 and writes the
+  Pulse socket into the bind-mounted `volumes/ledfx-pulse/` host dir. The
+  dir must be `chown 1000:1000` before first boot or LedFx can't create
+  the socket. (Authentication is anonymous — LedFx's bundled Pulse uses
+  `auth-anonymous=1`, so no cookie needs to be shared between containers.)
 
 ## Configuration touchpoints
 
 Files the user will edit during install:
 
 1. `.env` (copied from `.env.example`) — single source of truth for
-   operator settings: `AIRPLAY_NAME`, `WLED_IP`, `MQTT_*`,
-   `MQTT_ENABLED`, image tags. The render container picks up `AIRPLAY_NAME`
-   and `MQTT_*`; compose's auto-`.env` discovery picks up image tags and
-   anything used in the YAML's `${VAR}` substitutions.
+   operator settings: `AIRPLAY_NAME`, `MQTT_*`, `MQTT_ENABLED`, image
+   tags. The render container picks up `AIRPLAY_NAME` and `MQTT_*`;
+   compose's auto-`.env` discovery picks up image tags and anything used
+   in the YAML's `${VAR}` substitutions. The WLED IP is configured
+   directly in the LedFx web UI, not via `.env`.
 2. `shairport-sync/render-config.sh` — the source of truth for *fixed*
    shairport-sync settings (PA backend, `ignore_volume_control`,
    `publish_parsed`, autodiscovery prefix). Edit only when you want to
@@ -292,7 +295,7 @@ In order, gating each step before the next:
 | nqptp (bundled in shairport-sync image) | 1.2.x | per image build |
 | LedFx | 2.1.8 | 2026-04-21 |
 | Music Assistant | 2.8.6 | 2026-04-23 |
-| bash (render init container) | 5.2-alpine3.19 | upstream Docker official |
+| bash (render init container) | 5.2-alpine3.22 | upstream Docker official |
 
 The shairport-sync 5.0.4 image was built before nqptp 1.2.7 released; the
 bundled nqptp version is whatever was current when the image was built. This
@@ -318,3 +321,10 @@ is unlikely to affect AP2 sync quality — verified in testing if any issues.
   autodiscovery and an `MQTT_ENABLED` toggle. Architecture, components,
   configuration touchpoints, failure modes, testing strategy, and
   component versions updated accordingly.
+- **2026-05-08 (audit follow-up)** — Bumped render image off EOL Alpine
+  3.19 to `bash:5.2-alpine3.22`. Removed `WLED_IP` and `NAS_HOST` from
+  `.env.example` (informational-only, not consumed by the stack).
+  Removed vestigial `PULSE_COOKIE` from compose. Corrected Pulse-cookie
+  troubleshooting guidance to reflect LedFx's anonymous-Pulse model.
+  Documented MQTT credential storage. Deleted the now-stale
+  implementation plan; README + spec are the canonical docs.

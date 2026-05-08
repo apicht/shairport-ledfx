@@ -81,8 +81,8 @@ Override image tags in `.env` to upgrade.
   you don't care about audible playback).
 - UDP ports 319/320 free on the host. No other PTP daemon, HomeKit hub,
   or shairport-sync instance binding them.
-- An AirPlay name unique on your LAN (default: `Bathroom-Sync`; change in
-  `shairport-sync/shairport-sync.conf`).
+- An AirPlay name unique on your LAN (default: `Bathroom-Sync`; set
+  `AIRPLAY_NAME` in `.env`).
 
 `network_mode: host` is required, which means **Docker Desktop on macOS
 and Windows is not supported as a deployment target.** Edit on any
@@ -90,48 +90,57 @@ workstation, deploy on Linux.
 
 ## Quick start
 
+The stack must run on a Linux host (it requires `network_mode: host`).
+Deploy directly on that host, or develop on a workstation and copy the
+repo over via `rsync`/`ssh`.
+
 ```bash
 # 1. Configure environment
 cp .env.example .env
-$EDITOR .env                           # set WLED_IP, NAS_HOST
-set -a; source .env; set +a
+$EDITOR .env       # at minimum, set AIRPLAY_NAME and MQTT_HOST
+                   # (or set MQTT_ENABLED=no to skip MQTT entirely)
 
-# 2. (If deploying remotely) sync to host and prepare the bind-mount
-rsync -avz --exclude=.git --exclude=volumes ./ ${NAS_HOST}:~/shairport-ledfx/
-ssh ${NAS_HOST} 'mkdir -p ~/shairport-ledfx/volumes/ledfx-pulse && \
-                 sudo chown -R 1000:1000 ~/shairport-ledfx/volumes/ledfx-pulse'
-rsync -avz .env ${NAS_HOST}:~/shairport-ledfx/.env
-
-# 3. Bring up the stack
-ssh ${NAS_HOST} 'cd ~/shairport-ledfx && docker compose up -d'
-
-# 4. Verify
-ssh ${NAS_HOST} 'docker compose -f ~/shairport-ledfx/docker-compose.yml ps'
-curl -s -o /dev/null -w "%{http_code}\n" http://${NAS_HOST}:8888/   # LedFx web UI
-```
-
-If deploying directly on the host (no rsync), step 2 becomes:
-```bash
+# 2. Prepare the host volume (must be writable by UID 1000 — LedFx's user)
 mkdir -p volumes/ledfx-pulse
 sudo chown -R 1000:1000 volumes/ledfx-pulse
+
+# 3. Bring up the stack
 docker compose up -d
+
+# 4. Verify
+docker compose ps
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8888/   # LedFx web UI
 ```
 
-For the full step-by-step (including pre-flight conflict checks, AirPlay
-discovery test, LedFx audio device selection, WLED setup, and Music
-Assistant / Apple Home grouping), see
-[`docs/superpowers/plans/2026-05-07-airplay-ledfx-bathroom.md`](docs/superpowers/plans/2026-05-07-airplay-ledfx-bathroom.md).
+### Remote deploy (workstation → Linux host over SSH)
+
+If your workstation isn't the deploy target, replace `<nas>` with the
+target host's address:
+
+```bash
+rsync -avz --exclude=.git --exclude=volumes ./ <nas>:~/shairport-ledfx/
+rsync -avz .env <nas>:~/shairport-ledfx/.env
+ssh <nas> 'mkdir -p ~/shairport-ledfx/volumes/ledfx-pulse && \
+           sudo chown -R 1000:1000 ~/shairport-ledfx/volumes/ledfx-pulse && \
+           cd ~/shairport-ledfx && docker compose up -d'
+```
+
+After the stack is up, configure LedFx (audio source + WLED device) via
+the web UI on port `8888`. See [Configuration → LedFx](#ledfx) below.
 
 ## Configuration
 
 ### `.env`
 
-```
-WLED_IP=192.168.1.50
-NAS_HOST=nas.local
-LEDFX_IMAGE=ghcr.io/ledfx/ledfx:v2.1.8
-SHAIRPORT_IMAGE=mikebrady/shairport-sync:5.0.4
-```
+`.env.example` has every variable consumed by the stack with inline
+documentation. The required ones are:
+
+- `AIRPLAY_NAME` — visible name in AirPlay pickers (default `Bathroom-Sync`).
+- `MQTT_HOST` — required only when `MQTT_ENABLED=yes` (the default). Point
+  it at your Mosquitto broker.
+
+Image tags (`LEDFX_IMAGE`, `SHAIRPORT_IMAGE`, `RENDER_IMAGE`) are also
+in `.env` so you can upgrade by editing one file.
 
 ### `shairport-sync/render-config.sh`
 
@@ -189,6 +198,16 @@ automation:
 Replace `Bathroom-Sync` with your `AIRPLAY_NAME` (or your `MQTT_TOPIC`
 override).
 
+**Credential storage note.** `MQTT_PASSWORD` from `.env` is rendered into
+the libconfig file in plaintext (libconfig has no secret-store mechanism)
+inside the `shairport-config` Docker volume, and is also visible in
+`docker inspect shairport-config-render`. Both are local-host artifacts
+on the deploy machine — not exposed to the network — but if you're on a
+shared/multi-tenant Docker host, scope the broker user accordingly. For
+HA Mosquitto: create a dedicated user with publish-only ACLs to the
+`<AIRPLAY_NAME>/#` and `homeassistant/#` topic spaces rather than
+reusing your admin user.
+
 ### LedFx
 
 LedFx state lives in a Docker named volume (`ledfx-config`), persisted
@@ -220,7 +239,7 @@ cannot target them.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `shairport` logs `port unavailable` on 319/320 | Another nqptp/PTP service on the host | `sudo ss -lun \| grep -E ":(319\|320)"`, identify, disable |
-| `shairport` logs PulseAudio auth error | Cookie not shared between containers | Verify `volumes/ledfx-pulse/cookie` exists and is readable by UID 1000 |
+| `shairport` can't connect to PulseAudio socket | Bind-mount permissions wrong (LedFx runs as UID 1000) | `sudo chown -R 1000:1000 volumes/ledfx-pulse` and restart the stack. LedFx's bundled Pulse is anonymous (`auth-anonymous=1`), so no cookie sharing is needed — only the socket dir's ownership. |
 | LedFx audio meters flat | Wrong audio device, sink-input not landing | `docker exec ledfx pactl list short sink-inputs`; reselect device |
 | LEDs unresponsive but meters work | WLED DDP receive disabled | WLED → Sync Interfaces → enable DDP receive (port 4048) |
 | Bathroom-Sync vanishes from LAN | shairport crashed, mDNS confused | `docker logs shairport`; `docker compose restart shairport` |
@@ -229,9 +248,9 @@ cannot target them.
 ## Project layout
 
 ```
-.env.example                          # WLED_IP / NAS_HOST / image tags
-docker-compose.yml                    # ledfx + shairport on host networking
-shairport-sync/shairport-sync.conf    # AP2 receiver config
+.env.example                          # AIRPLAY_NAME, MQTT_*, image tags
+docker-compose.yml                    # ledfx + shairport + render init
+shairport-sync/render-config.sh       # renders shairport-sync.conf from .env
 volumes/ledfx-pulse/                  # host dir for shared Pulse socket
 docs/superpowers/specs/               # design rationale (why this shape)
 docs/superpowers/plans/               # step-by-step deployment plan

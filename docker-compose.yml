@@ -49,7 +49,6 @@ services:
         condition: service_completed_successfully
     environment:
       PULSE_SERVER: "unix:/tmp/pulseaudio.socket"
-      PULSE_COOKIE: "/tmp/cookie"
     volumes:
       - shairport-config:/cfg:ro
       - ./volumes/ledfx-pulse:/tmp:rw
