@@ -18,6 +18,22 @@ services:
         max-size: "10m"
         max-file: "5"
 
+  shairport-config-render:
+    image: ${RENDER_IMAGE}
+    container_name: shairport-config-render
+    command: ["bash", "/scripts/render-config.sh", "/out/shairport-sync.conf"]
+    environment:
+      AIRPLAY_NAME: ${AIRPLAY_NAME:?AIRPLAY_NAME required in .env}
+      MQTT_HOST: ${MQTT_HOST:?MQTT_HOST required in .env}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_TOPIC: ${MQTT_TOPIC:-}
+    volumes:
+      - ./shairport-sync:/scripts:ro
+      - shairport-config:/out
+    restart: "no"
+
   shairport:
     image: ${SHAIRPORT_IMAGE}
     container_name: shairport
@@ -28,12 +44,15 @@ services:
     depends_on:
       ledfx:
         condition: service_healthy
+      shairport-config-render:
+        condition: service_completed_successfully
     environment:
       PULSE_SERVER: "unix:/tmp/pulseaudio.socket"
       PULSE_COOKIE: "/tmp/cookie"
     volumes:
-      - ./shairport-sync/shairport-sync.conf:/etc/shairport-sync.conf:ro
+      - shairport-config:/cfg:ro
       - ./volumes/ledfx-pulse:/tmp:rw
+    command: ["-c", "/cfg/shairport-sync.conf"]
     logging:
       options:
         max-size: "10m"
@@ -41,3 +60,4 @@ services:
 
 volumes:
   ledfx-config:
+  shairport-config:

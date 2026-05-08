@@ -133,17 +133,57 @@ LEDFX_IMAGE=ghcr.io/ledfx/ledfx:v2.1.8
 SHAIRPORT_IMAGE=mikebrady/shairport-sync:5.0.4
 ```
 
-### `shairport-sync/shairport-sync.conf`
+### `shairport-sync/render-config.sh`
 
-The defaults are tuned for this stack:
+The shairport-sync config is rendered from `.env` at each `docker compose up`
+by a one-shot init container (`shairport-config-render`). The render
+script lives at `shairport-sync/render-config.sh` and emits a libconfig
+file to a named volume (`shairport-config`) which the shairport service
+reads from.
 
-- `name = "Bathroom-Sync"` — change to anything unique on your LAN.
-- `ignore_volume_control = "yes"` — keeps Pulse loopback at unity gain so
-  LedFx FFT sees consistent levels regardless of sender volume. Volume
-  control still happens at the speaker side.
-- `output_backend = "pulseaudio"` and a Unix-socket pointer at
-  `/tmp/pulseaudio.socket` (which is the LedFx-managed socket via the
-  shared bind-mount).
+Edit `.env` to change config — not the rendered file. The defaults are:
+
+- `AIRPLAY_NAME` — visible name in AirPlay pickers, MA, and Apple Home.
+- `output_backend = "pulseaudio"` — fixed in the render script. Points at
+  the LedFx-managed Unix socket via the shared bind-mount.
+- `ignore_volume_control = "yes"` — fixed in the render script. Keeps Pulse
+  loopback at unity gain so LedFx FFT sees consistent levels regardless of
+  sender volume. Volume control still happens at the speaker side.
+
+### MQTT publisher (Home Assistant integration)
+
+shairport-sync publishes AirPlay session events and track metadata to MQTT,
+with built-in HA-autodiscovery so a `media_player` entity appears in HA
+automatically. Set the `MQTT_*` vars in `.env` to point at your broker
+(typically the HA Mosquitto add-on).
+
+Topics published under `<topic>/...` (where `<topic>` is `MQTT_TOPIC` if set,
+otherwise `AIRPLAY_NAME`):
+
+| Topic | When |
+|---|---|
+| `play_start` | An AirPlay session begins |
+| `play_end` | An AirPlay session ends |
+| `play_flush` | Sender flushes the audio buffer (e.g., seek/skip) |
+| `play_resume` | Sender resumes after pause |
+| `title`, `artist`, `album`, `genre`, `format`, `songalbum`, `volume`, `client_ip` | Per-track metadata at session start |
+
+Use these as automation triggers in HA. Example:
+
+```yaml
+# configuration.yaml or an automation
+automation:
+  - alias: "Lights on when bathroom AirPlay starts"
+    trigger:
+      - platform: mqtt
+        topic: "Bathroom-Sync/play_start"
+    action:
+      - service: light.turn_on
+        target: { entity_id: light.bathroom }
+```
+
+Replace `Bathroom-Sync` with your `AIRPLAY_NAME` (or your `MQTT_TOPIC`
+override).
 
 ### LedFx
 
