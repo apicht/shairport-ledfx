@@ -195,4 +195,9 @@ docs/superpowers/plans/               # step-by-step deployment plan
 
 ## License
 
-MIT (or whatever you decide before publishing).
+Apache License 2.0. See [`LICENSE`](LICENSE).
+
+This repository contains only orchestration (compose file, configs, docs).
+Each component pulled at deploy time remains under its own upstream license:
+shairport-sync (MIT), nqptp (GPL-2.0), LedFx (GPL-3.0), Music Assistant
+(Apache-2.0), WLED firmware (EUPL-1.2).
