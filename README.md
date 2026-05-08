@@ -157,6 +157,10 @@ with built-in HA-autodiscovery so a `media_player` entity appears in HA
 automatically. Set the `MQTT_*` vars in `.env` to point at your broker
 (typically the HA Mosquitto add-on).
 
+Toggle the publisher with `MQTT_ENABLED` in `.env`. Set to `no` (or
+`false`/`0`/`off`) to skip the entire mqtt block in the rendered config —
+no broker required, no autodiscovery published. Default is `yes`.
+
 Topics published under `<topic>/...` (where `<topic>` is `MQTT_TOPIC` if set,
 otherwise `AIRPLAY_NAME`):
 

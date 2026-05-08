@@ -24,7 +24,8 @@ services:
     command: ["bash", "/scripts/render-config.sh", "/out/shairport-sync.conf"]
     environment:
       AIRPLAY_NAME: ${AIRPLAY_NAME:?AIRPLAY_NAME required in .env}
-      MQTT_HOST: ${MQTT_HOST:?MQTT_HOST required in .env}
+      MQTT_ENABLED: ${MQTT_ENABLED:-yes}
+      MQTT_HOST: ${MQTT_HOST:-}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-}
       MQTT_PASSWORD: ${MQTT_PASSWORD:-}
