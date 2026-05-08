@@ -1,0 +1,22 @@
+services:
+  ledfx:
+    image: ${LEDFX_IMAGE}
+    container_name: ledfx
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ledfx-config:/home/ledfx/ledfx-config:rw
+      - ./volumes/ledfx-pulse:/home/ledfx/.config/pulse:rw
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /home/ledfx/.config/pulse/pulseaudio.socket || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  ledfx-config:
