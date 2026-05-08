@@ -330,6 +330,13 @@ is unlikely to affect AP2 sync quality — verified in testing if any issues.
   autodiscovery and an `MQTT_ENABLED` toggle. Architecture, components,
   configuration touchpoints, failure modes, testing strategy, and
   component versions updated accordingly.
+- **2026-05-08 (PA sink fix)** — Removed `sink = "";` from the rendered
+  `pulseaudio` block. shairport-sync 5.x's PA backend treats an empty
+  string as "look up a sink with this name" rather than "use default,"
+  causing `pa_stream_connect_playback()` to fail with `PA_BAD_STATE` on
+  the first AirPlay session. Default-sink behavior (the `auto_null` sink
+  from `module-always-sink`) is now selected by **omitting** the `sink`
+  line entirely.
 - **2026-05-08 (volume fix)** — Switched `ledfx-config` from named volume
   to bind mount at `./volumes/ledfx-config/`. Cause: the upstream LedFx
   Dockerfile chowns `/home/ledfx` at build but never creates
