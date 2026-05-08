@@ -72,7 +72,7 @@ events to a Mosquitto broker that Home Assistant subscribes to.
 
 ### LedFx (audio-reactive engine)
 
-- Image: `ghcr.io/ledfx/ledfx:v2.1.8`
+- Image: `ledfxorg/ledfx:2.1.8`
 - Runs in PulseAudio **server mode** (a Pulse instance lives inside the
   container). The official LedFx Docker docs document this pattern.
 - Exposes the Pulse socket to siblings via a bind-mount of
@@ -321,6 +321,11 @@ is unlikely to affect AP2 sync quality — verified in testing if any issues.
   autodiscovery and an `MQTT_ENABLED` toggle. Architecture, components,
   configuration touchpoints, failure modes, testing strategy, and
   component versions updated accordingly.
+- **2026-05-08 (image registry fix)** — LedFx publishes versioned images
+  to Docker Hub as `ledfxorg/ledfx:<version>`, not to GHCR. The original
+  `ghcr.io/ledfx/ledfx:v2.1.8` pin failed with "manifest unknown"; the
+  ghcr repo only ships `2.0.x` and `edge-*` tags. Pinned to
+  `ledfxorg/ledfx:2.1.8` instead.
 - **2026-05-08 (audit follow-up)** — Bumped render image off EOL Alpine
   3.19 to `bash:5.2-alpine3.22`. Removed `WLED_IP` and `NAS_HOST` from
   `.env.example` (informational-only, not consumed by the stack).
